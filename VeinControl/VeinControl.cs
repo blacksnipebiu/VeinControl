@@ -14,7 +14,7 @@ namespace VeinControl
         private Dictionary<string, string> TranslateDict;
         public const string GUID = "cn.blacksnipe.dsp.VeinControl";
         public const string NAME = "VeinControl";
-        public const string VERSION = "1.0.5";
+        public const string VERSION = "1.0.6";
         public const string GAME_PROCESS = "DSPGAME.exe";
         public int MaxHeight;
         public int MaxWidth;
@@ -229,6 +229,7 @@ namespace VeinControl
         public void controlVein()
         {
             if (GameMain.mainPlayer == null || GameMain.localPlanet == null || GameMain.localPlanet.type == EPlanetType.Gas) return;
+            if (GameMain.mainPlayer.controller == null || GameMain.mainPlayer.controller.actionBuild == null || GameMain.mainPlayer.controller.actionBuild.clickTool.active) return;
             if (Input.GetMouseButton(0))
             {
                 if (GameMain.mainPlayer.controller.actionBuild.dismantleTool.active)
