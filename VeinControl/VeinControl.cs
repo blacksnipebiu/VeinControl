@@ -14,7 +14,7 @@ namespace VeinControl
         private Dictionary<string, string> TranslateDict;
         public const string GUID = "cn.blacksnipe.dsp.VeinControl";
         public const string NAME = "VeinControl";
-        public const string VERSION = "1.0.4";
+        public const string VERSION = "1.0.5";
         public const string GAME_PROCESS = "DSPGAME.exe";
         public int MaxHeight;
         public int MaxWidth;
@@ -348,15 +348,25 @@ namespace VeinControl
             if (!Physics.Raycast(GameMain.mainPlayer.controller.mainCamera.ScreenPointToRay(Input.mousePosition), out raycastHit1, 800f, 8720, (QueryTriggerInteraction)2))
                 return new VeinData();
             Vector3 raycastpos = raycastHit1.point;
-            foreach (VeinData i in pd.factory.veinPool)
+            float min = 100;
+            VeinData vein = new VeinData();
+            foreach (VeinData vd in pd.factory.veinPool)
             {
-                if (i.id == 0) continue;
-                if ((raycastpos - i.pos).magnitude < 2 && i.type != EVeinType.None)
+                if (vd.id == 0) continue;
+                if ((raycastpos - vd.pos).magnitude < min && vd.type != EVeinType.None)
                 {
-                    return i;
+                    min = (raycastpos - vd.pos).magnitude;
+                    vein = vd;
                 }
             }
-            return new VeinData();
+            if (min > 4)
+            {
+                return new VeinData();
+            }
+            else
+            {
+                return vein;
+            }
         }
 
         /// <summary>
