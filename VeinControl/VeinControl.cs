@@ -2,6 +2,8 @@
 using BepInEx.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace VeinControl
@@ -11,13 +13,27 @@ namespace VeinControl
 
     public class VeinControl : BaseUnityPlugin
     {
-        private Dictionary<string, string> TranslateDict;
-        public const string GUID = "cn.blacksnipe.dsp.VeinControl";
-        public const string NAME = "VeinControl";
-        public const string VERSION = "1.0.5";
-        public const string GAME_PROCESS = "DSPGAME.exe";
-        public int MaxHeight;
-        public int MaxWidth;
+        private const string GUID = "cn.blacksnipe.dsp.VeinControl";
+        private const string NAME = "VeinControl";
+        private const string VERSION = "1.1.0";
+        private const string GAME_PROCESS = "DSPGAME.exe";
+        private bool coolDown;
+        public bool CoolDown
+        {
+            get => coolDown;
+            set
+            {
+                coolDown = value;
+                if (value)
+                {
+                    Task.Run(() =>
+                    {
+                        Thread.Sleep(1000);
+                        coolDown = false;
+                    });
+                }
+            }
+        }
         public int veintype;
         public bool ShowWindow;
         public bool ShowInstructionsWindow;
@@ -26,8 +42,6 @@ namespace VeinControl
         public bool FirstOpen;
         public bool dropdownbutton;
         public VeinData pointveindata;
-        public float Temp_Window_X;
-        public float Temp_Window_Y;
         public float Temp_Window_Moving_X;
         public float Temp_Window_Moving_Y;
         public float Temp_Window_X_move;
@@ -42,51 +56,48 @@ namespace VeinControl
         public static ConfigEntry<Boolean> ControlToggol;
         public static ConfigEntry<Boolean> MergeOil;
         public static ConfigEntry<Boolean> MergeVeinGroup;
-        public static ConfigEntry<KeyboardShortcut> OpenWindowKey; 
-        public string getTranslate(string s) => Localization.language != Language.zhCN && TranslateDict.ContainsKey(s) && TranslateDict[s].Length > 0 ? TranslateDict[s] : s;
+        public static ConfigEntry<Boolean> MoveAllVeinGroup;
+        public static ConfigEntry<KeyboardShortcut> OpenWindowKey;
 
         private void Start()
         {
             ShowWindow = false;
             FirstOpen = true;
             veintype = 0;
-            TranslateDict = new Dictionary<string, string>();
-            RegallTranslate();
+            TranslateDic.RegallTranslate();
             changeveinsposx = Config.Bind("切割矿脉数量", "changeveinsposx", 9);
             veinlines = Config.Bind("矿物行数", "veinlines", 3);
-            ControlToggol= Config.Bind("启动/关闭", "ControlToggol", true);
+            ControlToggol = Config.Bind("启动/关闭", "ControlToggol", false);
             MergeOil = Config.Bind("合并油井", "MergeOil", false);
+            MoveAllVeinGroup = Config.Bind("移动所有矿", "MoveAllVeinGroup", false);
             MergeVeinGroup = Config.Bind("合并矿堆", "MergeVeinGroup", false);
             OpenWindowKey = Config.Bind("打开窗口快捷键", "Key", new BepInEx.Configuration.KeyboardShortcut(KeyCode.Q, KeyCode.LeftControl));
             scale = Config.Bind("大小适配", "scale", 16);
             Window_X = 450;
             Window_Y = 200;
-            Temp_Window_X = Window_X;
-            Temp_Window_Y = Window_Y;
-            Window_Width = scale.Value *35 ;
-            Window_Height = scale.Value*5+10;
             Temp_Window_Moving_X = 0;
             Temp_Window_Moving_Y = 0;
         }
-        
+
         private void Update()
         {
-            MaxHeight = Screen.height;
-            MaxWidth = Screen.width;
             if (OpenWindowKey.Value.IsDown())
             {
                 ShowWindow = !ShowWindow;
             }
-            if(Input.GetKey(KeyCode.LeftControl)||Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.LeftShift))
+            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.LeftShift))
             {
                 veintype = 0;
             }
             if (ShowWindow && Input.GetKey(KeyCode.LeftControl))
             {
-                if (Input.GetKeyDown(KeyCode.UpArrow)) { scale.Value++; ScaleChanging = true; }
-                if (Input.GetKeyDown(KeyCode.DownArrow)) { scale.Value--; ScaleChanging = true; }
-                if (scale.Value <= 5) scale.Value = 5;
-                if (scale.Value > 35) scale.Value = 35;
+                int t = (int)(Input.GetAxis("Mouse Wheel") * 10);
+                int temp = scale.Value + t;
+                if (Input.GetKeyDown(KeyCode.UpArrow)) { temp++; }
+                if (Input.GetKeyDown(KeyCode.DownArrow)) { temp--; }
+                temp = Math.Max(5, Math.Min(temp, 35));
+                scale.Value = temp;
+                ScaleChanging = true;
             }
             controlVein();
         }
@@ -105,46 +116,50 @@ namespace VeinControl
                     GUI.skin.textField.fontSize = scale.Value;
                     GUI.skin.textArea.fontSize = scale.Value;
                     Window_Width = scale.Value * 15;
-                    Window_Height = (scale.Value+4) * 5;
+                    Window_Height = (scale.Value + 4) * 5;
                 }
                 else if (!ScaleChanging && GUI.skin.toggle.fontSize != scale.Value)
                 {
                     scale.Value = GUI.skin.toggle.fontSize;
                 }
-                Rect windowRect = new Rect(Temp_Window_X, Temp_Window_Y, Window_Width, Window_Height);
-                moveWindow(ref Temp_Window_X, ref Temp_Window_Y, ref Temp_Window_X_move, ref Temp_Window_Y_move, ref Window_moving, ref Temp_Window_Moving_X, ref Temp_Window_Moving_Y, Window_Width);
-                windowRect = GUI.Window(20220702, windowRect, VeinControlConfigWindow, getTranslate("矿脉工具") + "(" + VERSION + ")" + "ps:ctrl+↑↓");
-                Window_X = Temp_Window_X;
-                Window_Y = Temp_Window_Y;
+                int UIHeight = GUI.skin.toggle.fontSize + 4;
+                Window_Height = UIHeight * 13;
+                if (dropdownbutton)
+                {
+                    Window_Height += UIHeight * 20;
+                }
+                Rect windowRect = new Rect(Window_X, Window_Y, Window_Width, Window_Height);
+                moveWindow(ref Window_X, ref Window_Y, ref Temp_Window_X_move, ref Temp_Window_Y_move, ref Window_moving, ref Temp_Window_Moving_X, ref Temp_Window_Moving_Y, Window_Width);
+                windowRect = GUI.Window(20220702, windowRect, VeinControlConfigWindow, "矿脉工具".Translate() + "(" + VERSION + ")" + "ps:ctrl+↑↓");
                 if (ShowInstructionsWindow)
                 {
-                    Rect windowRect1 = new Rect(Temp_Window_X+ Window_Width, Temp_Window_Y, Localization.language != Language.zhCN ? (scale.Value + 4) * 20 : Window_Width,  (scale.Value + 4) * 8);
-                    moveWindow(ref Temp_Window_X, ref Temp_Window_Y, ref Temp_Window_X_move, ref Temp_Window_Y_move, ref Window_moving, ref Temp_Window_Moving_X, ref Temp_Window_Moving_Y, Window_Width);
+                    Rect windowRect1 = new Rect(Window_X + Window_Width, Window_Y, Localization.language != Language.zhCN ? UIHeight * 20 : Window_Width, UIHeight * 12);
                     windowRect1 = GUI.Window(20220703, windowRect1, InstructionsWindow, "");
-                    Window_X = Temp_Window_X;
-                    Window_Y = Temp_Window_Y;
                 }
             }
         }
-        
+
         public void VeinControlConfigWindow(int winId)
         {
             int UIHeight = GUI.skin.toggle.fontSize + 4;
-            int UIWidth = scale.Value * 13;
-            int Lines = 0;
-            GUILayout.BeginArea(new Rect(10,30, Window_Width, Window_Height));
-            if (GUI.Button(new Rect(UIWidth- UIHeight, UIHeight * Lines, UIHeight, UIHeight + 5), "?"))
+            var maxwidthoption = new[] { GUILayout.Width(Window_Width - UIHeight) };
+            var halfwidthoption = new[] { GUILayout.Width(Window_Width / 2) };
+
+            if (GUI.Button(new Rect(Window_Width - UIHeight * 2, UIHeight + 10, UIHeight + 5, UIHeight + 5), "?"))
             {
                 ShowInstructionsWindow = !ShowInstructionsWindow;
             }
-            ControlToggol.Value = GUI.Toggle(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight), ControlToggol.Value, getTranslate("启动/关闭"));
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight+5), getTranslate("整理为") + $" {veinlines.Value } " + getTranslate("行"));
-            veinlines.Value = (int)GUI.HorizontalSlider(new Rect(0, UIHeight/2+ UIHeight * Lines++, UIWidth, UIHeight), veinlines.Value, 1, 20);
+            GUILayout.BeginVertical();
+            ControlToggol.Value = GUILayout.Toggle(ControlToggol.Value, "启动/关闭".Translate(), halfwidthoption);
+            MergeVeinGroup.Value = GUILayout.Toggle(MergeVeinGroup.Value, "合并矿脉".Translate());
+            MoveAllVeinGroup.Value = GUILayout.Toggle(MoveAllVeinGroup.Value, "移动所有矿".Translate(), halfwidthoption);
+            GUILayout.Label("整理为".Translate() + $" {veinlines.Value} " + "行".Translate());
+            veinlines.Value = (int)GUILayout.HorizontalSlider(veinlines.Value, 1, 20, maxwidthoption);
 
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight+5), getTranslate("切割出") + $" {changeveinsposx.Value } "  + getTranslate("个"));
-            changeveinsposx.Value = (int)GUI.HorizontalSlider(new Rect(0, UIHeight / 3 + UIHeight * Lines++, UIWidth, UIHeight), changeveinsposx.Value, 2, 72);
-            MergeOil.Value = GUI.Toggle(new Rect(0, UIHeight * Lines++, UIWidth,UIHeight),MergeOil.Value, getTranslate("合并油井"));
-            if (GUI.Button(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight), veintype==0? getTranslate("不添加") : LDB.ItemName(int.Parse(VeintypechineseTranslate(veintype, 1).Trim()))))
+            GUILayout.Label("切割出".Translate() + $" {changeveinsposx.Value} " + "个".Translate());
+            changeveinsposx.Value = (int)GUILayout.HorizontalSlider(changeveinsposx.Value, 2, 72, maxwidthoption);
+            MergeOil.Value = GUILayout.Toggle(MergeOil.Value, "合并油井".Translate());
+            if (GUILayout.Button(veintype == 0 ? "不添加".Translate() : LDB.ItemName(int.Parse(VeintypechineseTranslate(veintype, 1).Trim())), maxwidthoption))
             {
                 dropdownbutton = !dropdownbutton;
             }
@@ -153,74 +168,28 @@ namespace VeinControl
                 for (int i = 0; i <= 14; i++)
                 {
                     if (veintype == i) continue;
-                    if (GUI.Button(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight), i == 0 ? getTranslate("不添加") : LDB.ItemName(int.Parse(VeintypechineseTranslate(i, 1).Trim()))))
+                    if (GUILayout.Button(i == 0 ? "不添加".Translate() : LDB.ItemName(int.Parse(VeintypechineseTranslate(i, 1).Trim())), maxwidthoption))
                     {
                         dropdownbutton = !dropdownbutton;
                         veintype = i;
                     }
                 }
             }
-            Window_Height= UIHeight * (Lines+2);
-            GUILayout.EndArea();
+            GUILayout.EndVertical();
         }
 
         public void InstructionsWindow(int winId)
         {
-            int UIHeight = GUI.skin.toggle.fontSize + 4;
-            int UIWidth = (int)(Localization.language != Language.zhCN ? (scale.Value + 4) * 20 : Window_Width);
-            int Lines = 0;
-            GUILayout.BeginArea(new Rect(10, 30, UIWidth, (scale.Value + 4) * 8));
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight + 5), getTranslate("ctrl+鼠标左键:移动单矿"));
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight + 5), getTranslate("alt+鼠标左键:移动矿堆"));
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight + 5), getTranslate("shift+鼠标左键:移动所有矿"));
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight + 5), getTranslate("alt+x+鼠标左键:切割矿脉"));
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight + 5), getTranslate("X:进入拆除模式可以拆除矿脉"));
-            GUI.Label(new Rect(0, UIHeight * Lines++, UIWidth, UIHeight + 5), getTranslate("~(Esc键下方):合并/不合并"));
+            GUILayout.BeginVertical();
+            GUILayout.Label("警告：不要将油井移动到极点附近".Translate());
+            GUILayout.Label("ctrl+鼠标左键:移动单矿".Translate());
+            GUILayout.Label("alt+鼠标左键:移动矿堆".Translate());
+            GUILayout.Label("shift+鼠标左键:移动所有矿".Translate());
+            GUILayout.Label("alt+x+鼠标左键:切割矿脉".Translate());
+            GUILayout.Label("X:进入拆除模式可以拆除矿脉".Translate());
+            GUILayout.Label("~(Esc键下方):合并/不合并".Translate());
 
-            GUILayout.EndArea();
-        }
-        /// <summary>
-        /// 移动窗口
-        /// </summary>
-        /// <param name="x"></param>
-        /// <param name="y"></param>
-        /// <param name="x_move"></param>
-        /// <param name="y_move"></param>
-        /// <param name="movewindow"></param>
-        /// <param name="tempx"></param>
-        /// <param name="tempy"></param>
-        /// <param name="x_width"></param>
-        public void moveWindow(ref float x, ref float y, ref float x_move, ref float y_move, ref bool movewindow, ref float tempx, ref float tempy, float x_width)
-        {
-            Vector2 temp = Input.mousePosition;
-            if (temp.x > x && temp.x < x + x_width && MaxHeight - temp.y > y && MaxHeight - temp.y < y + 20)
-            {
-                if (Input.GetMouseButton(0))
-                {
-                    if (!movewindow)
-                    {
-                        x_move = x;
-                        y_move = y;
-                        tempx = temp.x;
-                        tempy = MaxHeight - temp.y;
-                    }
-                    movewindow = true;
-                    x = x_move + temp.x - tempx;
-                    y = y_move + (MaxHeight - temp.y) - tempy;
-                }
-                else
-                {
-                    movewindow = false;
-                    tempx = x;
-                    tempy = y;
-                }
-            }
-            else if (movewindow)
-            {
-                movewindow = false;
-                x = x_move + temp.x - tempx;
-                y = y_move + (MaxHeight - temp.y) - tempy;
-            }
+            GUILayout.EndHorizontal();
         }
 
         /// <summary>
@@ -238,12 +207,12 @@ namespace VeinControl
                         RemoveVeinByMouse();
                     }
                 }
-                else if (veintype!=0)
+                else if (veintype != 0)
                 {
                     AddVein(veintype, 1000000000, new Vector3());
                 }
             }
-            if (veintype!=0 && Input.GetMouseButton(1))
+            if (veintype != 0 && Input.GetMouseButton(1))
             {
                 veintype = 0;
             }
@@ -259,7 +228,7 @@ namespace VeinControl
                     {
                         MergeVeinGroup.Value = !MergeVeinGroup.Value;
                     }
-                    if (Input.GetKey(KeyCode.LeftShift))
+                    if (MoveAllVeinGroup.Value && Input.GetKey(KeyCode.LeftShift))
                     {
                         GetAllVein(pointveindata);
                     }
@@ -403,6 +372,7 @@ namespace VeinControl
         /// <param name="vd">目标矿脉</param>
         public void ChangeVeinGroupPos(VeinData vd)
         {
+            if (CoolDown) return;
             PlanetData pd = GameMain.localPlanet;
             RaycastHit raycastHit1;
             if (!Physics.Raycast(GameMain.mainPlayer.controller.mainCamera.ScreenPointToRay(Input.mousePosition), out raycastHit1, 800f, 8720, (QueryTriggerInteraction)2))
@@ -412,42 +382,41 @@ namespace VeinControl
             int colliderId;
             Vector3 begin = veinPool[vd.id].pos;
             int index = 0;
+            var prefabDesc = LDB.veins.Select((int)vd.type).prefabDesc;
             foreach (VeinData vd1 in veinPool)
             {
-                if (vd1.pos == null || vd1.id <= 0) continue;
+                if (vd1.pos == null || vd1.id <= 0 || vd1.groupIndex != veinPool[vd.id].groupIndex) continue;
                 int VeinId = vd1.id;
-                if (vd1.groupIndex == veinPool[vd.id].groupIndex)
+                if (vd.type == EVeinType.Oil && MergeOil.Value && vd.id != VeinId)
                 {
-                    if (vd.type == EVeinType.Oil && MergeOil.Value && vd.id != VeinId)
+                    pd.factory.veinPool[vd.id].amount += vd1.amount;
+                    pd.factory.veinGroups[vd.groupIndex].count--;
+                    pd.factory.RemoveVeinWithComponents(vd1.id);
+                    pd.factory.RecalculateVeinGroup(pd.factory.veinPool[vd.id].groupIndex);
+                    pd.factory.ArrangeVeinGroups();
+                    continue;
+                }
+                if (MergeVeinGroup.Value)
+                {
+                    veinPool[VeinId].pos = raycastpos;
+                }
+                else
+                {
+                    Vector3 temp = PostionCompute(begin, raycastpos, vd1.pos, index++, vd.type == EVeinType.Oil);
+                    if (CoolDown) return;
+                    if (Vector3.Distance(temp, vd1.pos) < 0.01) continue;
+                    veinPool[VeinId].pos = temp;
+                    if (float.IsNaN(veinPool[VeinId].pos.x) || float.IsNaN(veinPool[VeinId].pos.y) || float.IsNaN(veinPool[VeinId].pos.z))
                     {
-                        pd.factory.veinPool[vd.id].amount += vd1.amount;
-                        pd.factory.veinGroups[vd.groupIndex].count--;
-                        pd.factory.RemoveVeinWithComponents(vd1.id);
-                        pd.factory.RecalculateVeinGroup(pd.factory.veinPool[vd.id].groupIndex);
-                        pd.factory.ArrangeVeinGroups();
                         continue;
                     }
-                    if (MergeVeinGroup.Value)
-                    {
-                        veinPool[VeinId].pos = raycastpos;
-                    }
-                    else
-                    {
-                        Vector3 temp = PostionCompute(begin, raycastpos, vd1.pos, index++, vd.type == EVeinType.Oil);
-                        if (Vector3.Distance(temp, vd1.pos) < 0.01) continue;
-                        veinPool[VeinId].pos = temp;
-                        if (float.IsNaN(veinPool[VeinId].pos.x) || float.IsNaN(veinPool[VeinId].pos.y) || float.IsNaN(veinPool[VeinId].pos.z))
-                        {
-                            continue;
-                        }
-                    }
-                    colliderId = veinPool[VeinId].colliderId;
-                    pd.physics.RemoveColliderData(colliderId);
-                    veinPool[VeinId].colliderId = pd.physics.AddColliderData(LDB.veins.Select((int)veinPool[VeinId].type).prefabDesc.colliders[0].BindToObject(VeinId, 0, EObjectType.Vein, veinPool[VeinId].pos, Quaternion.FromToRotation(Vector3.up, veinPool[VeinId].pos.normalized)));
-
-                    pd.factoryModel.gpuiManager.AlterModel(veinPool[VeinId].modelIndex, veinPool[VeinId].modelId, VeinId, veinPool[VeinId].pos, Maths.SphericalRotation(veinPool[VeinId].pos, 90f));
-
                 }
+                colliderId = veinPool[VeinId].colliderId;
+                pd.physics.RemoveColliderData(colliderId);
+                veinPool[VeinId].colliderId = pd.physics.AddColliderData(prefabDesc.colliders[0].BindToObject(VeinId, 0, EObjectType.Vein, veinPool[VeinId].pos, Quaternion.FromToRotation(Vector3.up, veinPool[VeinId].pos.normalized)));
+
+                pd.factoryModel.gpuiManager.AlterModel(veinPool[VeinId].modelIndex, veinPool[VeinId].modelId, VeinId, veinPool[VeinId].pos, Maths.SphericalRotation(veinPool[VeinId].pos, 90f));
+
             }
 
             pd.factory.RecalculateVeinGroup(vd.groupIndex);
@@ -519,6 +488,7 @@ namespace VeinControl
         /// <param name="vd"></param>
         public void GetAllVein(VeinData vd)
         {
+            if (CoolDown) return;
             PlanetData pd = GameMain.localPlanet;
             RaycastHit raycastHit1;
             if (!Physics.Raycast(GameMain.mainPlayer.controller.mainCamera.ScreenPointToRay(Input.mousePosition), out raycastHit1, 800f, 8720, (QueryTriggerInteraction)2))
@@ -541,9 +511,10 @@ namespace VeinControl
                     pd.factory.RecalculateVeinGroup(pd.factory.veinPool[vd.id].groupIndex);
                     pd.factory.RecalculateVeinGroup(vd1.groupIndex);
                     pd.factory.ArrangeVeinGroups();
-                    continue ;
+                    continue;
                 }
                 veinPool[VeinId].pos = MergeVeinGroup.Value ? raycastpos : PostionCompute(begin, raycastpos, vd1.pos, index++, vd.type == EVeinType.Oil);
+                if (CoolDown) return;
                 if (float.IsNaN(veinPool[VeinId].pos.x) || float.IsNaN(veinPool[VeinId].pos.y) || float.IsNaN(veinPool[VeinId].pos.z))
                 {
                     continue;
@@ -572,6 +543,7 @@ namespace VeinControl
         /// <param name="vd"></param>
         public void SplitxVeinsFrom(VeinData vd)
         {
+            if (CoolDown) return;
             PlanetData pd = GameMain.localPlanet;
             RaycastHit raycastHit1;
             if (!Physics.Raycast(GameMain.mainPlayer.controller.mainCamera.ScreenPointToRay(Input.mousePosition), out raycastHit1, 800f, 8720, (QueryTriggerInteraction)2))
@@ -613,7 +585,7 @@ namespace VeinControl
                 pd.physics.RemoveColliderData(colliderId);
                 veinPool[VeinId].colliderId = pd.physics.AddColliderData(LDB.veins.Select((int)veinPool[VeinId].type).prefabDesc.colliders[0].BindToObject(VeinId, 0, EObjectType.Vein, veinPool[VeinId].pos, Quaternion.FromToRotation(Vector3.up, veinPool[VeinId].pos.normalized)));
 
-                pd.factoryModel.gpuiManager.AlterModel((int)veinPool[VeinId].modelIndex, veinPool[VeinId].modelId, VeinId, veinPool[VeinId].pos, Maths.SphericalRotation(veinPool[VeinId].pos, 90f));
+                pd.factoryModel.gpuiManager.AlterModel(veinPool[VeinId].modelIndex, veinPool[VeinId].modelId, VeinId, veinPool[VeinId].pos, Maths.SphericalRotation(veinPool[VeinId].pos, 90f));
 
             }
             bool leave = true;
@@ -659,8 +631,13 @@ namespace VeinControl
         /// <returns></returns>
         public Vector3 PostionCompute(Vector3 begin, Vector3 end, Vector3 pointpos, int index, bool oil = false)
         {
-            if (end.y > 193 || end.y < -193) return pointpos;
-            if((MergeOil.Value && oil) || MergeVeinGroup.Value)
+            if (end.y > 193 || end.y < -193)
+            {
+                UIMessageBox.Show("移动矿堆失败".Translate(), "当前纬度过高，为避免出错，无法移动矿堆".Translate(), "确定".Translate(), 3);
+                CoolDown = true;
+                return pointpos;
+            }
+            if ((MergeOil.Value && oil) || MergeVeinGroup.Value)
             {
                 return end;
             }
@@ -700,7 +677,7 @@ namespace VeinControl
             }
             return pos3;
         }
-        
+
         /// <summary>
         /// 将下标翻译为名字/ID
         /// </summary>
@@ -747,23 +724,49 @@ namespace VeinControl
             return "";
         }
 
-        public void RegallTranslate()
+        /// <summary>
+        /// 移动窗口
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="y"></param>
+        /// <param name="x_move"></param>
+        /// <param name="y_move"></param>
+        /// <param name="movewindow"></param>
+        /// <param name="tempx"></param>
+        /// <param name="tempy"></param>
+        /// <param name="x_width"></param>
+        public void moveWindow(ref float x, ref float y, ref float x_move, ref float y_move, ref bool movewindow, ref float tempx, ref float tempy, float x_width)
         {
-            TranslateDict.Clear();
-            TranslateDict.Add("启动/关闭", "On/Off");
-            TranslateDict.Add("切割出", "Cut out");
-            TranslateDict.Add("整理为", "Organized as");
-            TranslateDict.Add("个", "veins");
-            TranslateDict.Add("行", "lines");
-            TranslateDict.Add("合并油井", "Merge Oil");
-            TranslateDict.Add("矿脉工具", "Vein Control Tool");
-            TranslateDict.Add("不添加", "No Add Vein");
-            TranslateDict.Add("ctrl+鼠标左键:移动单矿", "ctrl+LeftMouse：Move Vein");
-            TranslateDict.Add("alt+鼠标左键:移动矿堆", "alt+LeftMouse：Move the vein group");
-            TranslateDict.Add("shift+鼠标左键:移动所有矿", "shift+LeftMouse：Move all veins");
-            TranslateDict.Add("alt+x+鼠标左键:切割矿脉", "alt+x+LeftMouse：Cut the veins from vein group");
-            TranslateDict.Add("X:进入拆除模式可以拆除矿脉", "x:Remove vein on Dismantle Mode");
-            TranslateDict.Add("~(Esc键下方):合并/不合并", "~:Merge or not merge ");
+            Vector2 temp = Input.mousePosition;
+            int MaxHeight = Screen.height;
+            if (temp.x > x && temp.x < x + x_width && MaxHeight - temp.y > y && MaxHeight - temp.y < y + 20)
+            {
+                if (Input.GetMouseButton(0))
+                {
+                    if (!movewindow)
+                    {
+                        x_move = x;
+                        y_move = y;
+                        tempx = temp.x;
+                        tempy = MaxHeight - temp.y;
+                    }
+                    movewindow = true;
+                    x = x_move + temp.x - tempx;
+                    y = y_move + (MaxHeight - temp.y) - tempy;
+                }
+                else
+                {
+                    movewindow = false;
+                    tempx = x;
+                    tempy = y;
+                }
+            }
+            else if (movewindow)
+            {
+                movewindow = false;
+                x = x_move + temp.x - tempx;
+                y = y_move + (MaxHeight - temp.y) - tempy;
+            }
         }
 
     }
