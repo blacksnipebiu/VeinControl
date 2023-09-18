@@ -1,10 +1,7 @@
-﻿using BepInEx;
-using BepInEx.Configuration;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEngine;
 
 namespace VeinControl
 {
@@ -198,6 +195,7 @@ namespace VeinControl
         public void controlVein()
         {
             if (GameMain.mainPlayer == null || GameMain.localPlanet == null || GameMain.localPlanet.type == EPlanetType.Gas) return;
+            if (GameMain.mainPlayer.controller == null || GameMain.mainPlayer.controller.actionBuild == null || GameMain.mainPlayer.controller.actionBuild.clickTool.active) return;
             if (Input.GetMouseButton(0))
             {
                 if (GameMain.mainPlayer.controller.actionBuild.dismantleTool.active)
